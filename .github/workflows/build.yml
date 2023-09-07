@@ -1,0 +1,151 @@
+name: build
+
+on:
+  schedule:
+    - cron: "42 6 * * *"
+
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    outputs:
+      tag: ${{ steps.result.outputs.tag }}
+
+    steps:
+      - name: Get upstream tag
+        uses: oprypin/find-latest-tag@v1
+        id: upstream_tag
+        with:
+          repository: jqlang/jq
+          releases-only: true
+          regex: '^jq-\d+(\.\d+)+$'
+
+      - name: Upstream tag ${{ steps.upstream_tag.outputs.tag }}
+        run: echo "Upstream tag ${{ steps.upstream_tag.outputs.tag }}"
+
+      - name: Get downstream tag
+        uses: oprypin/find-latest-tag@v1
+        id: downstream_tag
+        continue-on-error: true
+        with:
+          repository: ${{ github.repository }}
+          releases-only: true
+          regex: '^jq-\d+(\.\d+)+$'
+
+      - name: Downstream tag ${{ steps.downstream_tag.outputs.tag }}
+        run: echo "Downstream tag ${{ steps.downstream_tag.outputs.tag }}"
+
+      - name: Result
+        id: result
+        if: steps.upstream_tag.outputs.tag != steps.downstream_tag.outputs.tag
+        run: echo tag=${{ steps.upstream_tag.outputs.tag }} >> $GITHUB_OUTPUT
+
+  build:
+    runs-on: windows-latest
+    needs: check
+    if: needs.check.outputs.tag != ''
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set version
+        id: version
+        run: |
+          $tag = "${{ needs.check.outputs.tag }}".Substring(3)
+          $version = [version]::new($tag)
+          if ($version.Build -lt 0)
+          {
+            $version = [version]::new($version.Major, $version.Minor, 0)
+          }
+
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "versionMajor=$($version.Major)" >> $env:GITHUB_OUTPUT
+          echo "versionMinor=$($version.Minor)" >> $env:GITHUB_OUTPUT
+          echo "versionBuild=$($version.Build)" >> $env:GITHUB_OUTPUT
+
+      - name: Setup wix
+        run: |
+          dotnet.exe tool install --global wix
+
+          wix.exe extension add WixToolset.UI.wixext --global
+
+          nuget.exe install WixToolset.Heat -o .
+          Get-ChildItem .\WixToolset.Heat.* -Recurse |
+            Where-Object { $_.FullName.EndsWith('x64\heat.exe') } |
+            Select-Object -ExpandProperty DirectoryName |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Download jq
+        run: |
+          gh.exe release download ${{ needs.check.outputs.tag }} --repo jqlang/jq --pattern jq-win64.exe
+          Get-ChildItem
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rename jq
+        run: |
+          New-Item ./build -ItemType Directory -ErrorAction Stop
+          Move-Item ./jq-win64.exe ./build/jq.exe -ErrorAction Stop
+
+      - name: Harvest installer
+        run: |
+          heat.exe `
+            dir `
+            build `
+            -nologo `
+            -ag `
+            -cg ProductComponents `
+            -dr INSTALLDIR `
+            -g1 `
+            -srd `
+            -sfrag `
+            -sreg `
+            -var var.ProductSource `
+            -o build\Fragment.wxs
+
+      - name: Build installer
+        run: |
+          wix.exe `
+            build `
+            -arch x64 `
+            -src build\Fragment.wxs src\Product.wxs `
+            -d ProductSource=build `
+            -d ProductVersion="${{ steps.version.outputs.version }}" `
+            -ext WixToolset.UI.wixext `
+            -out jq.msi
+
+      - name: Update installer
+        run: |
+          $path = Resolve-Path 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x86\msiinfo.exe' -ErrorAction Stop
+
+          & $path jq.msi -t "jq for Windows" -o "jq v${{ steps.version.outputs.version }}"
+
+      - name: Validate installer
+        run: wix.exe msi validate jq.msi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: jq-msi
+          path: ./jq.msi
+          if-no-files-found: error
+
+      - name: Test installer
+        run: |
+          $process = Start-Process msiexec.exe -ArgumentList '/i','jq.msi','/qn' -Wait -NoNewWindow -PassThru -ErrorAction Stop
+          if ($process.ExitCode -ne 0)
+          {
+              throw 'Non zero exit code: "{0}".' -f $process.ExitCode
+          }
+
+          $path = Join-Path $env:ProgramFiles 'jqlang\jq.exe'
+          & $path --version
+
+      - name: Publish release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: jq.msi
+          tag: ${{ needs.check.outputs.tag }}
+          body: jq Windows build packaged as an msi.

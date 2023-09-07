@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="jq" Language="1033" Version="$(var.ProductVersion)" Manufacturer="https://github.com/jqlang/jq" UpgradeCode="954da68c-81e5-4d4a-a466-07f15878fcdf">
+    <SummaryInformation Description="Command-line JSON processor." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <Media Id="1" Cabinet="Data.cab" EmbedCab="yes" CompressionLevel="high" />
+
+    <Feature Id="Product" ConfigurableDirectory="INSTALLDIR" Description="jq for Windows" Display="expand" Title="jq" AllowAbsent="no">
+      <ComponentGroupRef Id="ProductComponents" />
+      <Feature Id="EnvironmentPath" Description="Adds jq.exe to the system path." Title="Update system path" Level="2">
+        <ComponentRef Id="EnvironmentPathComponent" />
+      </Feature>
+    </Feature>
+
+    <UI>
+      <ui:WixUI Id="WixUI_FeatureTree" />
+      <!-- Remove LicenseAgreementDlg. -->
+      <Publish Dialog="WelcomeDlg"
+               Control="Next"
+               Event="NewDialog"
+               Value="CustomizeDlg"
+               Order="2" />
+      <Publish Dialog="CustomizeDlg"
+               Control="Back"
+               Event="NewDialog"
+               Value="WelcomeDlg"
+               Order="2" />
+    </UI>
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLDIR" Name="jqlang" />
+    </StandardDirectory>
+
+    <Component Id="EnvironmentPathComponent" Guid="4c475fe7-0696-424b-a61c-b0060a3392d2" Directory="INSTALLDIR">
+      <Environment Id="UpdatePath" Name="PATH" Action="set" Permanent="no" System="yes" Part="last" Value="[INSTALLDIR]" />
+    </Component>
+  </Package>
+</Wix>
