@@ -2,7 +2,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="jq" Language="1033" Version="$(var.ProductVersion)" Manufacturer="https://github.com/jqlang/jq" UpgradeCode="954da68c-81e5-4d4a-a466-07f15878fcdf">
     <SummaryInformation Description="Command-line JSON processor." />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." Comments="jq v$(var.ProductVersion)" />
     <Media Id="1" Cabinet="Data.cab" EmbedCab="yes" CompressionLevel="high" />
 
     <Feature Id="Product" ConfigurableDirectory="INSTALLDIR" Description="jq for Windows" Display="expand" Title="jq" AllowAbsent="no">
@@ -30,6 +30,10 @@
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLDIR" Name="jqlang" />
     </StandardDirectory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLDIR">
+      <Files Include="$(var.ProductSource)" />
+    </ComponentGroup>
 
     <Component Id="EnvironmentPathComponent" Guid="4c475fe7-0696-424b-a61c-b0060a3392d2" Directory="INSTALLDIR">
       <Environment Id="UpdatePath" Name="PATH" Action="set" Permanent="no" System="yes" Part="last" Value="[INSTALLDIR]" />
