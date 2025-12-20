@@ -16,32 +16,61 @@ jobs:
 
     steps:
       - name: Get upstream tag
-        uses: oprypin/find-latest-tag@v1
-        id: upstream_tag
-        with:
-          repository: jqlang/jq
-          releases-only: true
-          regex: '^jq-\d+(\.\d+)+$'
+        id: upstream-tag
+        run: |
+          result=$(gh release list --repo jqlang/jq --limit 1 --exclude-drafts --json tagName --jq '.[] |.tagName')
 
-      - name: Upstream tag ${{ steps.upstream_tag.outputs.tag }}
-        run: echo "Upstream tag ${{ steps.upstream_tag.outputs.tag }}"
+          if [ $? -ne 0 ]
+          then
+            exit $?
+          fi
+
+          echo $result
+
+          echo "tag=$result" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Get downstream tag
-        uses: oprypin/find-latest-tag@v1
-        id: downstream_tag
-        continue-on-error: true
-        with:
-          repository: ${{ github.repository }}
-          releases-only: true
-          regex: '^jq-\d+(\.\d+)+$'
+        id: downstream-tag
+        run: |
+          result=$(gh release list --repo ${{ github.repository_owner }}/${{ github.event.repository.name }} --limit 1 --exclude-drafts --json tagName --jq '.[] |.tagName')
 
-      - name: Downstream tag ${{ steps.downstream_tag.outputs.tag }}
-        run: echo "Downstream tag ${{ steps.downstream_tag.outputs.tag }}"
+          if [ $? -ne 0 ]
+          then
+            exit $?
+          fi
+
+          echo $result
+
+          echo "tag=$result" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Result
         id: result
-        if: steps.upstream_tag.outputs.tag != steps.downstream_tag.outputs.tag
-        run: echo tag=${{ steps.upstream_tag.outputs.tag }} >> $GITHUB_OUTPUT
+        shell: pwsh
+        run: |
+          $upstreamVersion = [Version]::new('${{ steps.upstream-tag.outputs.tag }}'.TrimStart('jq-'))
+
+          if ('${{ steps.downstream-tag.outputs.tag }}')
+          {
+            $downstreamVersion = [Version]::new('${{ steps.downstream-tag.outputs.tag }}'.TrimStart('jq-'))
+          }
+          else
+          {
+            $downstreamVersion = [Version]::new()
+          }
+
+          if ($upstreamVersion -gt $downstreamVersion)
+          {
+            echo 'Build required.'
+            "tag=${{ steps.upstream-tag.outputs.tag }}" >> $env:GITHUB_OUTPUT
+          }
+          else
+          {
+            echo 'Build not required.'
+          }
 
   build:
     runs-on: windows-latest
@@ -55,7 +84,7 @@ jobs:
       - name: Set version
         id: version
         run: |
-          $tag = "${{ needs.check.outputs.tag }}".Substring(3)
+          $tag = "${{ needs.check.outputs.tag }}".TrimStart('jq-')
           $version = [version]::new($tag)
           if ($version.Build -lt 0)
           {
